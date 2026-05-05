@@ -7,7 +7,7 @@ import { detectLanguage } from '../utils/mockResponses';
 export function useSession(type) {
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [language, setLanguage] = useState('English');
+  const [language, setLanguage] = useState('Auto-Detect');
 
   const startSession = useCallback(() => {
     const id = uuidv4();
@@ -15,7 +15,7 @@ export function useSession(type) {
       id,
       type,
       messages: [],
-      language: 'English',
+      language: 'Auto-Detect',
       leadScore: 'COLD',
       startTime: new Date().toISOString(),
       endTime: null,
@@ -23,7 +23,7 @@ export function useSession(type) {
     saveSession(session);
     setSessionId(id);
     setMessages([]);
-    setLanguage('English');
+    setLanguage('Auto-Detect');
     return id;
   }, [type]);
 
@@ -63,7 +63,7 @@ export function useSession(type) {
     }
     setSessionId(null);
     setMessages([]);
-    setLanguage('English');
+    setLanguage('Auto-Detect');
   }, []);
 
   return { sessionId, messages, language, startSession, addMessage, endSession };

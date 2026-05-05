@@ -36,11 +36,11 @@ function TypingBubble() {
 }
 
 // ── Web Speech API transcription hook ─────────────────────────────────────────
-function useSpeechToText() {
-  const [isListening, setIsListening]   = useState(false);
-  const [transcript, setTranscript]     = useState('');
-  const [sttError, setSttError]         = useState(null);
-  const recognitionRef                  = useRef(null);
+function useSpeechToText(currentLanguage) {
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [sttError, setSttError] = useState(null);
+  const recognitionRef = useRef(null);
 
   const isSupported = typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
@@ -52,9 +52,13 @@ function useSpeechToText() {
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.continuous      = false;
-    recognition.interimResults  = true;
-    recognition.lang            = 'en-IN'; // supports both English & Hindi
+    recognition.continuous = false;
+    recognition.interimResults = true;
+
+    // Dynamically set language based on detection
+    // en-IN is excellent for English & Hinglish (Roman script)
+    // hi-IN is best for pure Hindi (Devanagari script)
+    recognition.lang = currentLanguage === 'Hindi' ? 'hi-IN' : 'en-IN';
 
     recognition.onstart = () => setIsListening(true);
 
@@ -89,21 +93,21 @@ function useSpeechToText() {
 export default function VoicePage() {
   const { messages, language, startSession, addMessage, endSession } = useSession('voice');
   const { speak, stop, isSpeaking, isSupported: ttsSupported } = useTTS();
-  const { isListening, transcript, sttError, startListening, stopListening, isSupported: sttSupported } = useSpeechToText();
+  const { isListening, transcript, sttError, startListening, stopListening, isSupported: sttSupported } = useSpeechToText(language);
 
-  const [isProcessing, setIsProcessing]         = useState(false);
-  const [isTypingAI, setIsTypingAI]             = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isTypingAI, setIsTypingAI] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [sessionActive, setSessionActive]       = useState(false);
-  const [autoSpeak, setAutoSpeak]               = useState(true);
-  const [textInput, setTextInput]               = useState('');
-  const [inputMode, setInputMode]               = useState('voice');
-  const [apiError, setApiError]                 = useState(null);
-  const [interimText, setInterimText]           = useState('');
-  const [liveLeadScore, setLiveLeadScore]       = useState('COLD');
+  const [sessionActive, setSessionActive] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [textInput, setTextInput] = useState('');
+  const [inputMode, setInputMode] = useState('voice');
+  const [apiError, setApiError] = useState(null);
+  const [interimText, setInterimText] = useState('');
+  const [liveLeadScore, setLiveLeadScore] = useState('COLD');
 
   const messagesEndRef = useRef(null);
-  const textInputRef   = useRef(null);
+  const textInputRef = useRef(null);
   const prevTranscript = useRef('');
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTypingAI]);
@@ -111,7 +115,7 @@ export default function VoicePage() {
   // Sync interim transcript display while user is speaking
   useEffect(() => {
     if (isListening) setInterimText(transcript);
-    else             setInterimText('');
+    else setInterimText('');
   }, [isListening, transcript]);
 
   // When recognition ends and we have a transcript — send it
@@ -155,18 +159,18 @@ export default function VoicePage() {
         source,
         meta: {
           detectedLanguage: data.detected_language,
-          interestLevel:    data.interest_level,
-          networkSize:      data.network_size,
-          requiresHandoff:  data.requires_handoff,
-          nextAction:       data.recommended_next_action,
-          objections:       data.objections_handled,
+          interestLevel: data.interest_level,
+          networkSize: data.network_size,
+          requiresHandoff: data.requires_handoff,
+          nextAction: data.recommended_next_action,
+          objections: data.objections_handled,
         },
       };
 
       // Pass backend metadata so session is updated with accurate lead score + language
       const meta = {
         leadScore: normalizeLeadScore(data.lead_classification),
-        language:  data.detected_language,
+        language: data.detected_language,
       };
       setLiveLeadScore(meta.leadScore);
       addMessage(currentSessionId, aiMsg, meta);
@@ -183,12 +187,12 @@ export default function VoicePage() {
     } catch (err) {
       console.error(err);
       let errMsg = 'Sorry, the server is busy.';
-      
+
       // Check for 503 or "high demand" errors specifically
       if (err.message.includes('503') || err.message.includes('high demand')) {
         errMsg = 'Our customer support is busy, we will call you later.';
       }
-      
+
       setApiError(errMsg);
       if (autoSpeak && ttsSupported) {
         speak(errMsg, {
@@ -211,11 +215,11 @@ export default function VoicePage() {
     setSessionActive(true);
     setLiveLeadScore('COLD');
     prevTranscript.current = '';
-    
-    // Trigger initial AI greeting
+
+    // Start listening immediately for the user's first message
     setTimeout(() => {
-      handleSendText("hello", 'trigger');
-    }, 500);
+      if (sttSupported) startListening();
+    }, 400);
   }
 
   function endSess() {
@@ -308,9 +312,9 @@ export default function VoicePage() {
                     <div className="bubble-meta">
                       <span className="bubble-time">{formatTime(msg.time)}</span>
                       <span className="source-pill" style={{
-                        color:      msg.source === 'voice' ? '#a855f7' : '#60a5fa',
+                        color: msg.source === 'voice' ? '#a855f7' : '#60a5fa',
                         background: msg.source === 'voice' ? 'rgba(168,85,247,0.09)' : 'rgba(96,165,250,0.09)',
-                        border:     `1px solid ${msg.source === 'voice' ? 'rgba(168,85,247,0.18)' : 'rgba(96,165,250,0.18)'}`,
+                        border: `1px solid ${msg.source === 'voice' ? 'rgba(168,85,247,0.18)' : 'rgba(96,165,250,0.18)'}`,
                       }}>
                         <Icon name={msg.source === 'voice' ? 'mic' : 'message-sq'} size={9} strokeWidth={2.5} />
                         {msg.source}
@@ -361,8 +365,8 @@ export default function VoicePage() {
             }}>
               <div className="mode-tabs">
                 {[
-                  { key: 'voice', icon: 'mic',        label: 'Voice' },
-                  { key: 'text',  icon: 'message-sq', label: 'Text'  },
+                  { key: 'voice', icon: 'mic', label: 'Voice' },
+                  { key: 'text', icon: 'message-sq', label: 'Text' },
                 ].map(({ key, icon, label }) => (
                   <button key={key}
                     className={`mode-tab${inputMode === key ? ' active' : ''}`}
@@ -409,7 +413,7 @@ export default function VoicePage() {
                   >
                     {isListening
                       ? <Icon name="square" size={26} color="#fff" fill="#fff" />
-                      : <Icon name="mic"    size={28} color="#fff" />}
+                      : <Icon name="mic" size={28} color="#fff" />}
                   </button>
                   <p className="mic-hint">
                     {isListening ? 'Listening — tap to stop' : 'Tap to record'}
