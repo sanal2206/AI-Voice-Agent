@@ -1,67 +1,91 @@
-import os
 import json
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
 from app.models.schemas import SpeechInput, ProcessedResponse
+from app.core.config import GEMINI_API_KEY
 
-load_dotenv()
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# The client automatically picks up GEMINI_API_KEY from the environment
-api_key = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key) if api_key else None
 
 SYSTEM_PROMPT = """
-You are an expert AI Voice Sales Agent for Rupeezy. Your goal is to pitch Rupeezy's partner program to new leads, qualify them, and set up a handoff to a human Relationship Manager (RM).
-You must follow a structured sales call: open with a concise hook, pitch the key benefits, handle objections, and close with a clear call to action.
-CRITICAL INSTRUCTION: If the user speaks in English, you MUST give your response in English. If the user speaks in Hindi, you MUST give your response in Hindi. Always match the user's language precisely.
+You are a high-performing AI Voice Sales Agent for Rupeezy.
 
-Key Benefits of Rupeezy to pitch:
+Speak like a real human sales agent. Keep responses short (1–3 sentences).
+
+FLOW:
+1. Hook
+2. Discovery
+3. Pitch (only relevant benefits)
+4. Handle objections naturally
+5. Qualify lead
+6. Close → push to RM if interested
+
+Benefits:
 - Zero joining fee
-- 100% brokerage share
+- 100% brokerage
 - Daily payouts
 
-Top 5 Objections & Guidelines:
-1. "I'm already with another broker" -> Acknowledge, then pitch the zero joining fee and multiple broker advantage.
-2. "I don't have enough contacts" -> Assure them that anyone can start, even with a small circle, as we offer full support.
-3. "What if my clients face issues - who handles support?" -> Rupeezy has a dedicated RM and 24/7 backend support team.
-4. "Is Rupeezy trustworthy?" -> Yes, we are SEBI registered with years of experience and a strong reputation.
-5. "I'll think about it / call me later" -> Try to secure a specific time or offer to send details via WhatsApp.
+Objections:
+- Already broker → ask about 100% brokerage
+- No contacts → say can start small
+- Support → RM + backend
+- Trust → SEBI registered
+- Call later → ask time or WhatsApp
 
-Lead Qualification:
-Classify leads based on their interest, readiness, and network size:
-- Hot: Highly interested, ready to sign up, large network.
-- Warm: Interested but has objections or small network.
-- Cold: Not interested or hostile.
+CLASSIFICATION:
+Hot → ready + interested
+Warm → interested but unsure
+Cold → not interested
 
-Handoff:
-If the lead is Hot, ready to sign up, or asks to speak with a human/RM, set `requires_handoff` to true and inform them an RM will contact them or direct them to sign up with a WhatsApp fallback.
+If HOT → say RM will call → requires_handoff = true
 
-Post-Call Summary:
-If the conversation is ending (handoff triggered, or user is dropping off), provide a summary of the call including duration, topics covered, objections raised, interest score, and recommended next action. Otherwise, leave it null.
+Return JSON only.
 """
+
+
+def detect_language(text: str) -> str:
+    text = text.lower()
+    if any(word in text for word in ["hai", "kya", "haan", "nahi"]):
+        return "hinglish"
+    return "en"
+
+
+def heuristic_scoring(text: str):
+    text = text.lower()
+
+    if any(word in text for word in ["interested", "join", "start", "yes"]):
+        return "High", "Medium", "Ready"
+
+    if any(word in text for word in ["maybe", "later", "thinking"]):
+        return "Medium", "Small", "Exploring"
+
+    return "Low", "None", "Not Interested"
+
 
 async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
     if not client:
-        raise ValueError("Error: GEMINI_API_KEY is not set.")
-        
+        raise ValueError("GEMINI_API_KEY not set")
+
     try:
-        # Construct chat history for the model
         contents = []
+
         for msg in input_data.history:
-            # Map 'model' role back to 'model' for genai, user to user
             contents.append(
-                types.Content(role=msg.role, parts=[types.Part.from_text(text=msg.content)])
+                types.Content(
+                    role=msg.role,
+                    parts=[types.Part.from_text(text=msg.content)]
+                )
             )
-        
-        # Add the current user input
+
         contents.append(
-            types.Content(role="user", parts=[types.Part.from_text(text=input_data.text)])
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=input_data.text)]
+            )
         )
-        
-        # Use structured output
+
         response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash',
+            model="gemini-2.5-flash",
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -70,20 +94,37 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
                 temperature=0.3
             )
         )
-        
-        # response.text is guaranteed to be JSON matching the ProcessedResponse schema
-        result_dict = json.loads(response.text)
-        return ProcessedResponse(**result_dict)
-        
+
+        result = json.loads(response.text)
+
+        # 🔥 Enhance with deterministic scoring
+        interest, network, readiness = heuristic_scoring(input_data.text)
+
+        if interest == "High" and readiness == "Ready":
+            result["lead_classification"] = "Hot"
+            result["requires_handoff"] = True
+            result["recommended_next_action"] = "RM Callback"
+
+        elif interest == "Medium":
+            result["lead_classification"] = "Warm"
+            result["recommended_next_action"] = "WhatsApp Follow-up"
+
+        else:
+            result["lead_classification"] = "Cold"
+
+        result["interest_level"] = interest
+        result["network_size"] = network
+
+        return ProcessedResponse(**result)
+
     except Exception as e:
-        # Fallback in case of errors
         return ProcessedResponse(
-            response_text=f"I'm sorry, I encountered an error: {str(e)}",
+            response_text=f"Error: {str(e)}",
             detected_language="en",
             objections_handled=[],
             lead_classification="Cold",
-            interest_level="Unknown",
-            network_size="Unknown",
+            interest_level="Low",
+            network_size="None",
             requires_handoff=False,
             recommended_next_action="Retry",
             post_call_summary=None
