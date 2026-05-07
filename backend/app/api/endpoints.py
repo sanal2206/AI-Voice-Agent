@@ -50,10 +50,7 @@ async def voice_agent_endpoint(
     file: UploadFile = File(...), 
     history: Optional[str] = Form(None)
 ):
-    """
-    Unified endpoint: 
-    1. Upload Audio -> 2. Whisper STT + Lang Detect -> 3. LLM Response -> 4. Result
-    """
+    
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 

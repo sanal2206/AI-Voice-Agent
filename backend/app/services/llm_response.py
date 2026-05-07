@@ -1,10 +1,12 @@
 import json
-from google import genai
-from google.genai import types
+from openai import AsyncOpenAI
 from app.models.schemas import SpeechInput, ProcessedResponse
-from app.core.config import GEMINI_API_KEY
+from app.core.config import OPENROUTER_API_KEY, OPENROUTER_MODEL
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+client = AsyncOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
+) if OPENROUTER_API_KEY else None
 
 
 SYSTEM_PROMPT = """
@@ -53,6 +55,28 @@ Return a JSON object matching this schema:
 """
 
 
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "response_text": {"type": "string"},
+        "detected_language": {"type": "string"},
+        "objections_handled": {"type": "array", "items": {"type": "string"}},
+        "lead_classification": {"type": "string", "enum": ["Hot", "Warm", "Cold"]},
+        "interest_level": {"type": "string", "enum": ["High", "Medium", "Low"]},
+        "network_size": {"type": "string", "enum": ["Large", "Medium", "Small", "None"]},
+        "requires_handoff": {"type": "boolean"},
+        "recommended_next_action": {"type": "string"},
+        "conversation_ended": {"type": "boolean"},
+        "post_call_summary": {"type": "string"},
+    },
+    "required": [
+        "response_text", "detected_language", "objections_handled",
+        "lead_classification", "interest_level", "network_size",
+        "requires_handoff", "recommended_next_action", "conversation_ended",
+    ],
+}
+
+
 def detect_language(text: str) -> str:
     text = text.lower()
     # Basic heuristic for language detection if not provided
@@ -63,40 +87,33 @@ def detect_language(text: str) -> str:
 
 async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
     if not client:
-        raise ValueError("GEMINI_API_KEY not set")
+        raise ValueError("OPENROUTER_API_KEY not set")
 
     try:
-        contents = []
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         # Add history to context
         for msg in input_data.history:
-            contents.append(
-                types.Content(
-                    role=msg.role,
-                    parts=[types.Part.from_text(text=msg.content)]
-                )
-            )
+            # Map "model" role to "assistant" for OpenAI-compatible API
+            role = "assistant" if msg.role == "model" else msg.role
+            messages.append({"role": role, "content": msg.content})
 
         # Add current user input
-        contents.append(
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=input_data.text)]
-            )
+        messages.append({"role": "user", "content": input_data.text})
+
+        response = await client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=messages,
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            extra_headers={
+                "HTTP-Referer": "https://rupeezy.in",
+                "X-Title": "Rupeezy Voice Agent",
+            },
         )
 
-        response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash", # Using gemini-2.0-flash for better performance
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=ProcessedResponse,
-                temperature=0.3
-            )
-        )
+        result_text = response.choices[0].message.content
 
-        result_text = response.text
         # Ensure we have valid JSON
         try:
             result = json.loads(result_text)
@@ -109,7 +126,7 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
         # Ensure all fields from ProcessedResponse are present
         if "detected_language" not in result:
             result["detected_language"] = input_data.detected_language or detect_language(input_data.text)
-        
+
         return ProcessedResponse(**result)
 
     except Exception as e:
