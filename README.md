@@ -52,7 +52,8 @@ pip install -r requirements.txt
 Create a `.env` file in the `backend` folder:
 ```env
 DEEPGRAM_API_KEY=your_deepgram_key
-GOOGLE_API_KEY=your_gemini_key
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_MODEL=your_llm_model
 ```
 Start the backend server:
 ```bash
@@ -73,23 +74,21 @@ npm run dev
 
 ## 📸 Screenshots
 
-*(Replace the placeholder URLs below with your actual image paths once uploaded to the repo)*
 
-| Voice Call Interface | Lead Status Dashboard |
-|:---:|:---:|
-| ![Voice Call](docs/placeholders/voice-call.png) | ![Dashboard](docs/placeholders/dashboard.png) |
+<img width="1920" height="997" alt="screencapture-aivoiceagentforbharat-vercel-app-voice-2026-05-07-19_56_05" src="https://github.com/user-attachments/assets/85aa5c49-6c1c-422b-9a92-2c0dc4f41196" />
 
-| Live Hindi Conversation | RM/Lead Routing Flow |
-|:---:|:---:|
-| ![Hindi Chat](docs/placeholders/hindi-chat.png) | ![Routing Flow](docs/placeholders/routing-flow.png) |
+<img width="1920" height="1215" alt="screencapture-aivoiceagentforbharat-vercel-app-session-3e672cc1-4839-4b8a-bb30-3e6f90563f33-2026-05-07-19_55_44" src="https://github.com/user-attachments/assets/8dcdab72-2604-43ad-9b29-81b3a65374a6" />
 
----
+<img width="1920" height="1489" alt="screencapture-aivoiceagentforbharat-vercel-app-session-674e173a-7200-45df-bf17-c459722ec209-2026-05-07-19_55_18" src="https://github.com/user-attachments/assets/bb72b163-c09a-4db1-8d3b-3b1f77da0f8d" />
 
-## 🎥 Demo Video
+<img width="1920" height="1215" alt="screencapture-aivoiceagentforbharat-vercel-app-session-3e672cc1-4839-4b8a-bb30-3e6f90563f33-2026-05-07-19_55_44" src="https://github.com/user-attachments/assets/1b8f842c-0bbf-4c48-8fb2-b9dfaac31f95" />
 
-[![Watch the Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/maxresdefault.jpg)](https://youtube.com/YOUR_VIDEO_LINK)
+<img width="847" height="440" alt="Screenshot 2026-05-07 203958" src="https://github.com/user-attachments/assets/447dfb73-b1c1-4f5c-ab1e-897597adcf0b" /><img width="845" height="443" alt="Screenshot 2026-05-07 203910" src="https://github.com/user-attachments/assets/bf16319e-8935-4948-8ebc-78d40295c79b" />
 
-*(Click the image above to watch the AI Voice Agent in action, or [view it here](https://youtube.com/YOUR_VIDEO_LINK))*
+<img width="848" height="443" alt="Screenshot 2026-05-07 204012" src="https://github.com/user-attachments/assets/2b18be3d-aa8e-46cc-bd55-30c0b2051a4d" />
+
+<img width="847" height="440" alt="Screenshot 2026-05-07 203958" src="https://github.com/user-attachments/assets/4f1d6819-75e6-43bf-85e6-c6e0087b99e7" />
+
 
 ---
 
