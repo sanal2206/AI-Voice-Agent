@@ -131,6 +131,11 @@ export default function VoicePage() {
   const [apiError, setApiError] = useState(null);
   const [liveLeadScore, setLiveLeadScore] = useState('COLD');
 
+  const sessionActiveRef = useRef(sessionActive);
+  const inputModeRef = useRef(inputMode);
+  useEffect(() => { sessionActiveRef.current = sessionActive; }, [sessionActive]);
+  useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
+
   const messagesEndRef = useRef(null);
   const textInputRef = useRef(null);
   const prevAudioBlob = useRef(null);
@@ -169,7 +174,7 @@ export default function VoicePage() {
     try {
       // Pass current messages + the new user message as history
       const history = userMsg ? [...messages, userMsg] : messages;
-      const data = await processSpeech(trimmed, history);
+      const data = await processSpeech(trimmed, history, language);
 
       const aiMsg = {
         role: 'ai',
@@ -201,7 +206,7 @@ export default function VoicePage() {
           onEnd: () => {
             if (data.conversation_ended) {
               endSess();
-            } else if (inputMode === 'voice' && sttSupported && sessionActive) {
+            } else if (inputModeRef.current === 'voice' && sttSupported && sessionActiveRef.current) {
               startListening();
             }
           }
@@ -224,7 +229,7 @@ export default function VoicePage() {
         speak(errMsg, {
           lang: isHindi ? 'hi-IN' : 'en-IN',
           onEnd: () => {
-            if (inputMode === 'voice' && sttSupported && sessionActive) {
+            if (inputModeRef.current === 'voice' && sttSupported && sessionActiveRef.current) {
               startListening();
             }
           }
@@ -280,7 +285,7 @@ export default function VoicePage() {
           onEnd: () => {
             if (aiResponse.conversation_ended) {
               endSess();
-            } else if (inputMode === 'voice' && sttSupported && sessionActive) {
+            } else if (inputModeRef.current === 'voice' && sttSupported && sessionActiveRef.current) {
               startListening();
             }
           }
@@ -300,7 +305,7 @@ export default function VoicePage() {
         speak(errMsg, {
           lang: isHindi ? 'hi-IN' : 'en-IN',
           onEnd: () => {
-            if (inputMode === 'voice' && sttSupported && sessionActive) {
+            if (inputModeRef.current === 'voice' && sttSupported && sessionActiveRef.current) {
               startListening();
             }
           }
@@ -317,11 +322,6 @@ export default function VoicePage() {
     setSessionActive(true);
     setLiveLeadScore('COLD');
     prevAudioBlob.current = null;
-
-    // Start listening immediately for the user's first message
-    setTimeout(() => {
-      if (sttSupported) startListening();
-    }, 400);
   }
 
   function endSess() {
