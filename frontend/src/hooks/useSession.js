@@ -66,5 +66,5 @@ export function useSession(type) {
     setLanguage('Auto-Detect');
   }, []);
 
-  return { sessionId, messages, language, startSession, addMessage, endSession };
+  return { sessionId, messages, language, setLanguage, startSession, addMessage, endSession };
 }

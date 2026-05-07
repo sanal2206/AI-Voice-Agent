@@ -40,6 +40,7 @@ function useSpeechToText(currentLanguage) {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [sttError, setSttError] = useState(null);
+  const [sttStatus, setSttStatus] = useState('Idle');
   const recognitionRef = useRef(null);
 
   const isSupported = typeof window !== 'undefined' &&
@@ -47,6 +48,12 @@ function useSpeechToText(currentLanguage) {
 
   const startListening = useCallback(() => {
     if (!isSupported) { setSttError('Speech recognition not supported in this browser.'); return; }
+
+    // Stop any existing recognition instance
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) { }
+    }
+
     setSttError(null);
     setTranscript('');
 
@@ -55,14 +62,22 @@ function useSpeechToText(currentLanguage) {
     recognition.continuous = false;
     recognition.interimResults = true;
 
-    // Dynamically set language based on detection
-    // en-IN is excellent for English & Hinglish (Roman script)
-    // hi-IN is best for pure Hindi (Devanagari script)
-    recognition.lang = currentLanguage === 'Hindi' ? 'hi-IN' : 'en-IN';
+    // Using en-IN as it transcribes everything (including Hindi words) into Roman/English script (Hinglish).
+    // This model is specifically tuned for Indian accents and mixed-language speech.
+    // recognition.lang = 'en-IN';
+    recognition.lang = 'hi-IN';
 
-    recognition.onstart = () => setIsListening(true);
+    recognition.onstart = () => {
+      setIsListening(true);
+      setSttStatus('Ready');
+      console.log(`STT Started with language: ${selectedLang}`);
+    };
+
+    recognition.onspeechstart = () => setSttStatus('Hearing...');
+    recognition.onspeechend = () => setSttStatus('Processing...');
 
     recognition.onresult = (e) => {
+      setSttStatus('Transcribing...');
       const text = Array.from(e.results)
         .map(r => r[0].transcript)
         .join('');
@@ -70,15 +85,33 @@ function useSpeechToText(currentLanguage) {
     };
 
     recognition.onerror = (e) => {
-      setSttError(`Mic error: ${e.error}`);
+      console.error('STT Error:', e.error);
+      setSttStatus('Error');
+      if (e.error === 'no-speech') {
+        setSttError('No speech detected. Try speaking louder.');
+      } else if (e.error === 'network') {
+        setSttError('Network error. Speech recognition requires internet.');
+      } else if (e.error === 'language-not-supported') {
+        setSttError(`Language ${selectedLang} not supported.`);
+      } else {
+        setSttError(`Mic error: ${e.error}`);
+      }
       setIsListening(false);
     };
 
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      setSttStatus('Idle');
+    };
 
     recognitionRef.current = recognition;
-    recognition.start();
-  }, [isSupported]);
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error('Start error:', err);
+      setSttError('Failed to start microphone. Please refresh.');
+    }
+  }, [isSupported, currentLanguage]);
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
@@ -90,10 +123,30 @@ function useSpeechToText(currentLanguage) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+function LanguageSelector({ current, onSelect }) {
+  const options = ['Auto-Detect', 'English', 'Hindi', 'Hinglish'];
+  return (
+    <div className="language-selector">
+      <Icon name="globe" size={11} color="var(--text-3)" style={{ marginRight: 4 }} />
+      {options.map(opt => (
+        <button
+          key={opt}
+          className={`lang-option${current === opt ? ' active' : ''}`}
+          onClick={() => onSelect(opt)}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function VoicePage() {
   const { messages, language, startSession, addMessage, endSession } = useSession('voice');
   const { speak, stop, isSpeaking, isSupported: ttsSupported } = useTTS();
-  const { isListening, transcript, sttError, startListening, stopListening, isSupported: sttSupported } = useSpeechToText(language);
+  const { isListening, transcript, sttError, sttStatus, startListening, stopListening, isSupported: sttSupported } = useSpeechToText(language);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTypingAI, setIsTypingAI] = useState(false);
@@ -177,6 +230,7 @@ export default function VoicePage() {
 
       if (autoSpeak && ttsSupported) {
         speak(data.response_text, {
+          lang: data.detected_language === 'Hindi' ? 'hi-IN' : 'en-IN',
           onEnd: () => {
             if (inputMode === 'voice' && sttSupported && sessionActive) {
               startListening();
@@ -196,6 +250,7 @@ export default function VoicePage() {
       setApiError(errMsg);
       if (autoSpeak && ttsSupported) {
         speak(errMsg, {
+          lang: language === 'Hindi' ? 'hi-IN' : 'en-IN',
           onEnd: () => {
             if (inputMode === 'voice' && sttSupported && sessionActive) {
               startListening();
@@ -252,7 +307,7 @@ export default function VoicePage() {
             <>
               <div className="info-pill">
                 <Icon name="globe" size={11} color="var(--text-3)" />
-                <strong>{language}</strong>
+                <strong>Auto-Detect</strong>
               </div>
               <LeadBadge score={liveLeadScore} />
               <div className="info-pill">
@@ -326,7 +381,7 @@ export default function VoicePage() {
                         </span>
                       )}
                       {msg.role === 'ai' && ttsSupported && (
-                        <button className="replay-btn" onClick={() => speak(msg.text)} title="Replay">
+                        <button className="replay-btn" onClick={() => speak(msg.text, { lang: msg.meta?.detectedLanguage === 'Hindi' ? 'hi-IN' : 'en-IN' })} title="Replay">
                           <Icon name="volume-2" size={11} />
                         </button>
                       )}
@@ -415,9 +470,16 @@ export default function VoicePage() {
                       ? <Icon name="square" size={26} color="#fff" fill="#fff" />
                       : <Icon name="mic" size={28} color="#fff" />}
                   </button>
-                  <p className="mic-hint">
-                    {isListening ? 'Listening — tap to stop' : 'Tap to record'}
-                  </p>
+                  <div style={{ textAlign: 'center' }}>
+                    <p className="mic-hint">
+                      {isListening ? 'Listening — tap to stop' : 'Tap to record'}
+                    </p>
+                    {isListening && (
+                      <p style={{ fontSize: 10, color: 'var(--accent-2)', fontWeight: 600, marginTop: 4 }}>
+                        Live Status: {sttStatus}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="chat-input-area">
@@ -455,3 +517,5 @@ export default function VoicePage() {
     </div>
   );
 }
+
+
