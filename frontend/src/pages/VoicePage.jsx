@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Icon from '../components/Icon';
 import { useSession } from '../hooks/useSession';
 import { useTTS } from '../hooks/useTTS';
-import { processSpeech, normalizeLeadScore } from '../services/apiService';
+import { processSpeech, processVoice, normalizeLeadScore } from '../services/apiService';
 import LeadBadge from '../components/LeadBadge';
 import TTSToggle from '../components/TTSToggle';
 
@@ -35,90 +35,63 @@ function TypingBubble() {
   );
 }
 
-// ── Web Speech API transcription hook ─────────────────────────────────────────
-function useSpeechToText(currentLanguage) {
+// ── Audio Recording hook (replaces Web Speech API) ──────────────────────────
+function useAudioRecorder() {
   const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
+  const [audioBlob, setAudioBlob] = useState(null);
   const [sttError, setSttError] = useState(null);
   const [sttStatus, setSttStatus] = useState('Idle');
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
-  const isSupported = typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  const isSupported = typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
-  const startListening = useCallback(() => {
-    if (!isSupported) { setSttError('Speech recognition not supported in this browser.'); return; }
-
-    // Stop any existing recognition instance
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) { }
-    }
+  const startListening = useCallback(async () => {
+    if (!isSupported) { setSttError('Audio recording not supported in this browser.'); return; }
 
     setSttError(null);
-    setTranscript('');
+    setAudioBlob(null);
+    chunksRef.current = [];
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    // Using en-IN as it transcribes everything (including Hindi words) into Roman/English script (Hinglish).
-    // This model is specifically tuned for Indian accents and mixed-language speech.
-    // recognition.lang = 'en-IN';
-    recognition.lang = 'hi-IN';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setSttStatus('Ready');
-      console.log(`STT Started with language: ${selectedLang}`);
-    };
-
-    recognition.onspeechstart = () => setSttStatus('Hearing...');
-    recognition.onspeechend = () => setSttStatus('Processing...');
-
-    recognition.onresult = (e) => {
-      setSttStatus('Transcribing...');
-      const text = Array.from(e.results)
-        .map(r => r[0].transcript)
-        .join('');
-      setTranscript(text);
-    };
-
-    recognition.onerror = (e) => {
-      console.error('STT Error:', e.error);
-      setSttStatus('Error');
-      if (e.error === 'no-speech') {
-        setSttError('No speech detected. Try speaking louder.');
-      } else if (e.error === 'network') {
-        setSttError('Network error. Speech recognition requires internet.');
-      } else if (e.error === 'language-not-supported') {
-        setSttError(`Language ${selectedLang} not supported.`);
-      } else {
-        setSttError(`Mic error: ${e.error}`);
-      }
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      setSttStatus('Idle');
-    };
-
-    recognitionRef.current = recognition;
     try {
-      recognition.start();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.onstart = () => {
+        setIsListening(true);
+        setSttStatus('Recording...');
+      };
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(blob);
+        setIsListening(false);
+        setSttStatus('Idle');
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
     } catch (err) {
       console.error('Start error:', err);
-      setSttError('Failed to start microphone. Please refresh.');
+      setSttError('Failed to access microphone. Please allow permissions.');
+      setIsListening(false);
+      setSttStatus('Idle');
     }
-  }, [isSupported, currentLanguage]);
+  }, [isSupported]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
     setIsListening(false);
   }, []);
 
-  return { isListening, transcript, sttError, startListening, stopListening, isSupported };
+  return { isListening, audioBlob, sttError, sttStatus, startListening, stopListening, isSupported };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,7 +119,7 @@ function LanguageSelector({ current, onSelect }) {
 export default function VoicePage() {
   const { messages, language, startSession, addMessage, endSession } = useSession('voice');
   const { speak, stop, isSpeaking, isSupported: ttsSupported } = useTTS();
-  const { isListening, transcript, sttError, sttStatus, startListening, stopListening, isSupported: sttSupported } = useSpeechToText(language);
+  const { isListening, audioBlob, sttError, sttStatus, startListening, stopListening, isSupported: sttSupported } = useAudioRecorder();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTypingAI, setIsTypingAI] = useState(false);
@@ -156,30 +129,23 @@ export default function VoicePage() {
   const [textInput, setTextInput] = useState('');
   const [inputMode, setInputMode] = useState('voice');
   const [apiError, setApiError] = useState(null);
-  const [interimText, setInterimText] = useState('');
   const [liveLeadScore, setLiveLeadScore] = useState('COLD');
 
   const messagesEndRef = useRef(null);
   const textInputRef = useRef(null);
-  const prevTranscript = useRef('');
+  const prevAudioBlob = useRef(null);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTypingAI]);
 
-  // Sync interim transcript display while user is speaking
-  useEffect(() => {
-    if (isListening) setInterimText(transcript);
-    else setInterimText('');
-  }, [isListening, transcript]);
-
-  // When recognition ends and we have a transcript — send it
+  // When recording ends and we have a blob — send it
   useEffect(() => {
     if (isListening) return; // still recording
-    if (!transcript || transcript === prevTranscript.current) return;
+    if (!audioBlob || audioBlob === prevAudioBlob.current) return;
     if (!currentSessionId) return;
-    prevTranscript.current = transcript;
-    handleSendText(transcript, 'voice');
+    prevAudioBlob.current = audioBlob;
+    handleSendVoice(audioBlob);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isListening]);
+  }, [isListening, audioBlob]);
 
   // ── Core send function used by both voice & text modes ──────────────────────
   async function handleSendText(text, source = 'text') {
@@ -229,14 +195,19 @@ export default function VoicePage() {
       addMessage(currentSessionId, aiMsg, meta);
 
       if (autoSpeak && ttsSupported) {
+        const isHindi = data.detected_language?.toLowerCase().includes('hi');
         speak(data.response_text, {
-          lang: data.detected_language === 'Hindi' ? 'hi-IN' : 'en-IN',
+          lang: isHindi ? 'hi-IN' : 'en-IN',
           onEnd: () => {
-            if (inputMode === 'voice' && sttSupported && sessionActive) {
+            if (data.conversation_ended) {
+              endSess();
+            } else if (inputMode === 'voice' && sttSupported && sessionActive) {
               startListening();
             }
           }
         });
+      } else if (data.conversation_ended) {
+        endSess();
       }
     } catch (err) {
       console.error(err);
@@ -249,8 +220,9 @@ export default function VoicePage() {
 
       setApiError(errMsg);
       if (autoSpeak && ttsSupported) {
+        const isHindi = language?.toLowerCase().includes('hi');
         speak(errMsg, {
-          lang: language === 'Hindi' ? 'hi-IN' : 'en-IN',
+          lang: isHindi ? 'hi-IN' : 'en-IN',
           onEnd: () => {
             if (inputMode === 'voice' && sttSupported && sessionActive) {
               startListening();
@@ -264,12 +236,87 @@ export default function VoicePage() {
     }
   }
 
+  // ── Voice send function ───────────────────────────────────────────────────
+  async function handleSendVoice(blob) {
+    if (!currentSessionId || isTypingAI || isProcessing) return;
+
+    setApiError(null);
+    setIsTypingAI(true);
+
+    try {
+      const data = await processVoice(blob, messages);
+
+      const userMsg = { role: 'user', text: data.transcription.text, time: new Date().toISOString(), source: 'voice' };
+      addMessage(currentSessionId, userMsg);
+
+      const aiResponse = data.agent_response;
+      const aiMsg = {
+        role: 'ai',
+        text: aiResponse.response_text,
+        time: new Date().toISOString(),
+        source: 'voice',
+        meta: {
+          detectedLanguage: aiResponse.detected_language,
+          interestLevel: aiResponse.interest_level,
+          networkSize: aiResponse.network_size,
+          requiresHandoff: aiResponse.requires_handoff,
+          nextAction: aiResponse.recommended_next_action,
+          objections: aiResponse.objections_handled,
+        },
+      };
+
+      const meta = {
+        leadScore: normalizeLeadScore(aiResponse.lead_classification),
+        language: aiResponse.detected_language,
+      };
+
+      setLiveLeadScore(meta.leadScore);
+      addMessage(currentSessionId, aiMsg, meta);
+
+      if (autoSpeak && ttsSupported) {
+        const isHindi = aiResponse.detected_language?.toLowerCase().includes('hi');
+        speak(aiResponse.response_text, {
+          lang: isHindi ? 'hi-IN' : 'en-IN',
+          onEnd: () => {
+            if (aiResponse.conversation_ended) {
+              endSess();
+            } else if (inputMode === 'voice' && sttSupported && sessionActive) {
+              startListening();
+            }
+          }
+        });
+      } else if (aiResponse.conversation_ended) {
+        endSess();
+      }
+    } catch (err) {
+      console.error(err);
+      let errMsg = 'Sorry, the server is busy.';
+      if (err.message.includes('503') || err.message.includes('high demand')) {
+        errMsg = 'Our customer support is busy, we will call you later.';
+      }
+      setApiError(errMsg);
+      if (autoSpeak && ttsSupported) {
+        const isHindi = language?.toLowerCase().includes('hi');
+        speak(errMsg, {
+          lang: isHindi ? 'hi-IN' : 'en-IN',
+          onEnd: () => {
+            if (inputMode === 'voice' && sttSupported && sessionActive) {
+              startListening();
+            }
+          }
+        });
+      }
+    } finally {
+      setIsTypingAI(false);
+    }
+  }
+
   async function startSess() {
     const id = startSession();
     setCurrentSessionId(id);
     setSessionActive(true);
     setLiveLeadScore('COLD');
-    prevTranscript.current = '';
+    prevAudioBlob.current = null;
 
     // Start listening immediately for the user's first message
     setTimeout(() => {
@@ -283,7 +330,7 @@ export default function VoicePage() {
     setCurrentSessionId(null);
     setSessionActive(false);
     setApiError(null);
-    prevTranscript.current = '';
+    prevAudioBlob.current = null;
   }
 
   const isBusy = isProcessing || isTypingAI;
@@ -346,7 +393,7 @@ export default function VoicePage() {
           <>
             {/* Transcript */}
             <div style={{ padding: '20px 24px', minHeight: 220, maxHeight: 400, overflowY: 'auto' }}>
-              {messages.length === 0 && !interimText && (
+              {messages.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-3)', fontSize: 13 }}>
                   <Icon name="message-sq" size={28} color="var(--text-3)"
                     style={{ margin: '0 auto 10px', display: 'block', opacity: 0.4 }} />
@@ -381,7 +428,10 @@ export default function VoicePage() {
                         </span>
                       )}
                       {msg.role === 'ai' && ttsSupported && (
-                        <button className="replay-btn" onClick={() => speak(msg.text, { lang: msg.meta?.detectedLanguage === 'Hindi' ? 'hi-IN' : 'en-IN' })} title="Replay">
+                        <button className="replay-btn" onClick={() => {
+                          const isHindi = msg.meta?.detectedLanguage?.toLowerCase().includes('hi');
+                          speak(msg.text, { lang: isHindi ? 'hi-IN' : 'en-IN' });
+                        }} title="Replay">
                           <Icon name="volume-2" size={11} />
                         </button>
                       )}
@@ -396,17 +446,7 @@ export default function VoicePage() {
                 </div>
               ))}
 
-              {/* Interim voice transcript preview */}
-              {isListening && interimText && (
-                <div className="message-bubble user" style={{ opacity: 0.55 }}>
-                  <div className="bubble-avatar user-avatar">
-                    <Icon name="mic" size={13} color="#60a5fa" />
-                  </div>
-                  <div className="bubble-content">
-                    <div className="bubble-text" style={{ fontStyle: 'italic' }}>{interimText}…</div>
-                  </div>
-                </div>
-              )}
+              {/* No Interim voice transcript preview for backend STT */}
 
               {isTypingAI && <TypingBubble />}
               <div ref={messagesEndRef} />
