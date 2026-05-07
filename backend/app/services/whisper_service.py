@@ -21,7 +21,7 @@ class WhisperService:
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             print(f"Loading Whisper model on {device}...")
-            cls._model = whisper.load_model("small", device=device)
+            cls._model = whisper.load_model("base", device=device)
 
         return cls._instance
 
