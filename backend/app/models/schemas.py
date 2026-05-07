@@ -7,6 +7,7 @@ class Message(BaseModel):
 
 class SpeechInput(BaseModel):
     text: str
+    detected_language: Optional[str] = None
     history: List[Message] = []
 
 class ProcessedResponse(BaseModel):
@@ -19,3 +20,13 @@ class ProcessedResponse(BaseModel):
     requires_handoff: bool
     recommended_next_action: str
     post_call_summary: Optional[str] = None
+
+class TranscriptionResult(BaseModel):
+    text: str
+    language: str
+    confidence: float
+
+class VoiceAgentResponse(BaseModel):
+    """Unified response: audio transcription + LLM agent reply."""
+    transcription: TranscriptionResult
+    agent_response: ProcessedResponse

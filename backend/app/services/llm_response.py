@@ -114,6 +114,10 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
 
         result["interest_level"] = interest
         result["network_size"] = network
+        
+        # Use Whisper's detected language if provided
+        if input_data.detected_language:
+            result["detected_language"] = input_data.detected_language
 
         return ProcessedResponse(**result)
 
