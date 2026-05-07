@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://focused-creativity-production-70c6.up.railway.app';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://focused-creativity-production-70c6.up.railway.app';
 
 /**
  * Converts the frontend message format to what the backend expects.
@@ -31,13 +31,14 @@ function toApiHistory(messages) {
  *   post_call_summary: string | null,
  * }
  */
-export async function processSpeech(text, messages = []) {
+export async function processSpeech(text, messages = [], detectedLanguage = 'Auto-Detect') {
   const body = {
     text,
+    detected_language: detectedLanguage,
     history: toApiHistory(messages),
   };
 
-  const res = await fetch(`${API_BASE_URL}/api/process-speech`, {
+  const res = await fetch(`${API_BASE_URL}/api/process`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
