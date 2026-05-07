@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from app.services.whisper_service import whisper_service
+from app.services.deepgram_service import deepgram_service
 from app.services.llm_response import generate_llm_response
 from app.models.schemas import (
     SpeechInput, 
@@ -29,7 +29,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     
     try:
-        result = whisper_service.transcribe(file_path)
+        result = deepgram_service.transcribe(file_path)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -67,7 +67,7 @@ async def voice_agent_endpoint(
 
     try:
         # 1. Transcribe & Detect Language
-        transcription = whisper_service.transcribe(file_path)
+        transcription = deepgram_service.transcribe(file_path)
         
         # 2. Parse History if provided
         history_list = []
