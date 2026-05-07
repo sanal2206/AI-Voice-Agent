@@ -8,58 +8,57 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
 SYSTEM_PROMPT = """
-You are a high-performing AI Voice Sales Agent for Rupeezy.
+You are a high-performing AI Voice Sales Agent for Rupeezy. Your goal is to run a structured sales call following this script:
 
-Speak like a real human sales agent. Keep responses short (1–3 sentences).
+1. HOOK: Open with a concise, engaging hook.
+2. PITCH: Pitch key benefits:
+   - Zero joining fee
+   - 100% brokerage share
+   - Daily payouts
+3. OBJECTIONS: Handle these 5 core objections naturally:
+   - "Already with another broker": Rebuttal: Highlight 100% brokerage and better tech.
+   - "Don't have enough contacts": Rebuttal: You can start small, we provide training and leads.
+   - "Support issues / who handles support?": Rebuttal: Dedicated RM (Relationship Manager) + 24/7 backend support.
+   - "Is Rupeezy trustworthy?": Rebuttal: SEBI registered, thousands of happy partners, transparent daily payouts.
+   - "I'll think about it / call me later": Rebuttal: Ask for a specific time or offer to send details on WhatsApp immediately.
+4. QUALIFY: Qualify based on interest level, readiness, and network size.
+5. CLOSE: Clear call to action (CTA).
+   - If HOT: Push for immediate RM handoff or signup.
+   - If WARM/COLD: WhatsApp follow-up.
+   - End the conversation if:
+     a) The lead is qualified and handed off.
+     b) The lead is explicitly not interested (Cold).
+     c) A follow-up/callback is scheduled.
+     d) The user says goodbye or hangs up.
 
-FLOW:
-1. Hook
-2. Discovery
-3. Pitch (only relevant benefits)
-4. Handle objections naturally
-5. Qualify lead
-6. Close → push to RM if interested
+TONE & LANGUAGE:
+- Speak like a real human, not robotic.
+- Multilingual: Fluently switch between Hindi, English, and Hinglish. Support regional languages (Tamil, Telugu, Marathi, Gujarati, Bengali) if the user speaks them.
+- Adapt contextually to what the lead says.
 
-Benefits:
-- Zero joining fee
-- 100% brokerage
-- Daily payouts
-
-Objections:
-- Already broker → ask about 100% brokerage
-- No contacts → say can start small
-- Support → RM + backend
-- Trust → SEBI registered
-- Call later → ask time or WhatsApp
-
-CLASSIFICATION:
-Hot → ready + interested
-Warm → interested but unsure
-Cold → not interested
-
-If HOT → say RM will call → requires_handoff = true
-
-Return JSON only.
+OUTPUT FORMAT:
+Return a JSON object matching this schema:
+{
+  "response_text": "Your spoken response to the user",
+  "detected_language": "The language you detected",
+  "objections_handled": ["List of objections you identified and addressed"],
+  "lead_classification": "Hot" | "Warm" | "Cold",
+  "interest_level": "High" | "Medium" | "Low",
+  "network_size": "Large" | "Medium" | "Small" | "None",
+  "requires_handoff": true | false,
+  "recommended_next_action": "RM Call" | "WhatsApp Follow-up" | "None",
+  "conversation_ended": true | false,
+  "post_call_summary": "Summary of conversation: Duration (estimate), Topics, Objections, Score, Next Action"
+}
 """
 
 
 def detect_language(text: str) -> str:
     text = text.lower()
-    if any(word in text for word in ["hai", "kya", "haan", "nahi"]):
+    # Basic heuristic for language detection if not provided
+    if any(word in text for word in ["hai", "kya", "haan", "nahi", "kaise", "bhai"]):
         return "hinglish"
     return "en"
-
-
-def heuristic_scoring(text: str):
-    text = text.lower()
-
-    if any(word in text for word in ["interested", "join", "start", "yes"]):
-        return "High", "Medium", "Ready"
-
-    if any(word in text for word in ["maybe", "later", "thinking"]):
-        return "Medium", "Small", "Exploring"
-
-    return "Low", "None", "Not Interested"
 
 
 async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
@@ -69,6 +68,7 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
     try:
         contents = []
 
+        # Add history to context
         for msg in input_data.history:
             contents.append(
                 types.Content(
@@ -77,6 +77,7 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
                 )
             )
 
+        # Add current user input
         contents.append(
             types.Content(
                 role="user",
@@ -85,7 +86,7 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
         )
 
         response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash", # Using gemini-2.0-flash for better performance
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -95,35 +96,26 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
             )
         )
 
-        result = json.loads(response.text)
+        result_text = response.text
+        # Ensure we have valid JSON
+        try:
+            result = json.loads(result_text)
+        except json.JSONDecodeError:
+            # Fallback if JSON is wrapped in code blocks
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0]
+            result = json.loads(result_text)
 
-        # 🔥 Enhance with deterministic scoring
-        interest, network, readiness = heuristic_scoring(input_data.text)
-
-        if interest == "High" and readiness == "Ready":
-            result["lead_classification"] = "Hot"
-            result["requires_handoff"] = True
-            result["recommended_next_action"] = "RM Callback"
-
-        elif interest == "Medium":
-            result["lead_classification"] = "Warm"
-            result["recommended_next_action"] = "WhatsApp Follow-up"
-
-        else:
-            result["lead_classification"] = "Cold"
-
-        result["interest_level"] = interest
-        result["network_size"] = network
+        # Ensure all fields from ProcessedResponse are present
+        if "detected_language" not in result:
+            result["detected_language"] = input_data.detected_language or detect_language(input_data.text)
         
-        # Use Whisper's detected language if provided
-        if input_data.detected_language:
-            result["detected_language"] = input_data.detected_language
-
         return ProcessedResponse(**result)
 
     except Exception as e:
+        print(f"LLM Error: {e}")
         return ProcessedResponse(
-            response_text=f"Error: {str(e)}",
+            response_text="I'm sorry, I'm having a bit of trouble. Could you repeat that?",
             detected_language="en",
             objections_handled=[],
             lead_classification="Cold",
@@ -131,5 +123,6 @@ async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
             network_size="None",
             requires_handoff=False,
             recommended_next_action="Retry",
-            post_call_summary=None
+            conversation_ended=False,
+            post_call_summary=f"Error occurred: {str(e)}"
         )

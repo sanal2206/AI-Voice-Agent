@@ -9,11 +9,9 @@ from app.core.config import DEEPGRAM_API_KEY
 class DeepgramService:
     def __init__(self):
         if not DEEPGRAM_API_KEY:
-            # Fallback for development if not in .env yet
-            self.api_key = "b9c10b1977d38edfa0c2f997b504ad509a9bb13a"
-        else:
-            self.api_key = DEEPGRAM_API_KEY
+            raise ValueError("DEEPGRAM_API_KEY is not set in environment variables")
         
+        self.api_key = DEEPGRAM_API_KEY
         self.client = DeepgramClient(self.api_key)
 
     def transcribe(self, audio_path: str):

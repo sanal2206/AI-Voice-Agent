@@ -19,6 +19,7 @@ class ProcessedResponse(BaseModel):
     network_size: str
     requires_handoff: bool
     recommended_next_action: str
+    conversation_ended: bool
     post_call_summary: Optional[str] = None
 
 class TranscriptionResult(BaseModel):
