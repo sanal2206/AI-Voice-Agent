@@ -12,7 +12,7 @@ export default function Sidebar() {
     <>
       <nav className="mobile-nav">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div className="logo-icon"><Icon name="bot" size={18} color="#fff" /></div>
+          <img src="/favicon.png" alt="AI Agent Logo" className="logo-icon" style={{ objectFit: 'cover' }} />
           <span style={{ fontWeight: 700, fontSize: 14 }}>AI Agent</span>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -34,7 +34,7 @@ export default function Sidebar() {
 
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-icon"><Icon name="bot" size={18} color="#fff" /></div>
+          <img src="/favicon.png" alt="AI Agent Logo" className="logo-icon" style={{ objectFit: 'cover' }} />
           <div>
             <div className="logo-text">AI Sales Agent</div>
             <div className="logo-sub">Voice + Text</div>
