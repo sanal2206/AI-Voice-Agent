@@ -1,0 +1,128 @@
+import json
+from google import genai
+from google.genai import types
+from app.models.schemas import SpeechInput, ProcessedResponse
+from app.core.config import GEMINI_API_KEY
+
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+
+SYSTEM_PROMPT = """
+You are a high-performing AI Voice Sales Agent for Rupeezy. Your goal is to run a structured sales call following this script:
+
+1. HOOK: Open with a concise, engaging hook.
+2. PITCH: Pitch key benefits:
+   - Zero joining fee
+   - 100% brokerage share
+   - Daily payouts
+3. OBJECTIONS: Handle these 5 core objections naturally:
+   - "Already with another broker": Rebuttal: Highlight 100% brokerage and better tech.
+   - "Don't have enough contacts": Rebuttal: You can start small, we provide training and leads.
+   - "Support issues / who handles support?": Rebuttal: Dedicated RM (Relationship Manager) + 24/7 backend support.
+   - "Is Rupeezy trustworthy?": Rebuttal: SEBI registered, thousands of happy partners, transparent daily payouts.
+   - "I'll think about it / call me later": Rebuttal: Ask for a specific time or offer to send details on WhatsApp immediately.
+4. QUALIFY: Qualify based on interest level, readiness, and network size.
+5. CLOSE: Clear call to action (CTA).
+   - If HOT: Push for immediate RM handoff or signup.
+   - If WARM/COLD: WhatsApp follow-up.
+   - End the conversation if:
+     a) The lead is qualified and handed off.
+     b) The lead is explicitly not interested (Cold).
+     c) A follow-up/callback is scheduled.
+     d) The user says goodbye or hangs up.
+
+TONE & LANGUAGE:
+- Speak like a real human, not robotic.
+- Multilingual: Fluently switch between Hindi, English, and Hinglish. Support regional languages (Tamil, Telugu, Marathi, Gujarati, Bengali) if the user speaks them.
+- Adapt contextually to what the lead says.
+
+OUTPUT FORMAT:
+Return a JSON object matching this schema:
+{
+  "response_text": "Your spoken response to the user",
+  "detected_language": "The language you detected",
+  "objections_handled": ["List of objections you identified and addressed"],
+  "lead_classification": "Hot" | "Warm" | "Cold",
+  "interest_level": "High" | "Medium" | "Low",
+  "network_size": "Large" | "Medium" | "Small" | "None",
+  "requires_handoff": true | false,
+  "recommended_next_action": "RM Call" | "WhatsApp Follow-up" | "None",
+  "conversation_ended": true | false,
+  "post_call_summary": "Summary of conversation: Duration (estimate), Topics, Objections, Score, Next Action"
+}
+"""
+
+
+def detect_language(text: str) -> str:
+    text = text.lower()
+    # Basic heuristic for language detection if not provided
+    if any(word in text for word in ["hai", "kya", "haan", "nahi", "kaise", "bhai"]):
+        return "hinglish"
+    return "en"
+
+
+async def generate_llm_response(input_data: SpeechInput) -> ProcessedResponse:
+    if not client:
+        raise ValueError("GEMINI_API_KEY not set")
+
+    try:
+        contents = []
+
+        # Add history to context
+        for msg in input_data.history:
+            contents.append(
+                types.Content(
+                    role=msg.role,
+                    parts=[types.Part.from_text(text=msg.content)]
+                )
+            )
+
+        # Add current user input
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=input_data.text)]
+            )
+        )
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash", # Using gemini-2.0-flash for better performance
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ProcessedResponse,
+                temperature=0.3
+            )
+        )
+
+        result_text = response.text
+        # Ensure we have valid JSON
+        try:
+            result = json.loads(result_text)
+        except json.JSONDecodeError:
+            # Fallback if JSON is wrapped in code blocks
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0]
+            result = json.loads(result_text)
+
+        # Ensure all fields from ProcessedResponse are present
+        if "detected_language" not in result:
+            result["detected_language"] = input_data.detected_language or detect_language(input_data.text)
+        
+        return ProcessedResponse(**result)
+
+    except Exception as e:
+        print(f"LLM Error: {e}")
+        return ProcessedResponse(
+            response_text="I'm sorry, I'm having a bit of trouble. Could you repeat that?",
+            detected_language="en",
+            objections_handled=[],
+            lead_classification="Cold",
+            interest_level="Low",
+            network_size="None",
+            requires_handoff=False,
+            recommended_next_action="Retry",
+            conversation_ended=False,
+            post_call_summary=f"Error occurred: {str(e)}"
+        )
